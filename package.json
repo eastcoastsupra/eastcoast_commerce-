@@ -13,6 +13,7 @@
     "validate": "npm run check && npm test",
     "sync": "node src/cli.js",
     "dry-run:chemical-guys": "node src/cli.js --brand \"Chemical Guys\" --site all",
-    "apply:chemical-guys": "node src/cli.js --brand \"Chemical Guys\" --site all --apply"
+    "apply:chemical-guys": "node src/cli.js --brand \"Chemical Guys\" --site all --apply",
+    "live:chemical-guys": "node src/cli.js --brand \"Chemical Guys\" --site all --apply --mode raise-only --max-updates 10"
   }
 }

@@ -1,0 +1,45 @@
+name: Turn 14 MAP Dry Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      brand:
+        description: Turn 14 brand name
+        required: true
+        default: Chemical Guys
+      site:
+        description: eastcoastsupra, ecbmw, or all
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - eastcoastsupra
+          - ecbmw
+
+jobs:
+  dry-run:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm run validate
+      - name: Run dry comparison
+        env:
+          TURN14_CLIENT_ID: ${{ secrets.TURN14_CLIENT_ID }}
+          TURN14_CLIENT_SECRET: ${{ secrets.TURN14_CLIENT_SECRET }}
+          WIX_API_KEY: ${{ secrets.WIX_API_KEY }}
+        run: >-
+          node src/cli.js
+          --brand "${{ inputs.brand }}"
+          --site "${{ inputs.site }}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: turn14-map-report
+          path: reports/*.json
+          if-no-files-found: warn
