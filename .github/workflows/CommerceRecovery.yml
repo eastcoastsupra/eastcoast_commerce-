@@ -25,7 +25,7 @@ jobs:
         with:
           node-version: 22
       - run: npm run validate
-      - name: Recheck the two failed supplier windows and reconcile valid prices
+      - name: Quarantine inconsistent brand records and reconcile valid prices
         env:
           TURN14_CLIENT_ID: ${{ secrets.TURN14_CLIENT_ID }}
           TURN14_CLIENT_SECRET: ${{ secrets.TURN14_CLIENT_SECRET }}

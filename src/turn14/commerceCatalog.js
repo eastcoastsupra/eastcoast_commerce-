@@ -89,7 +89,6 @@ const FAILURE_MESSAGES = Object.freeze({
   "pagination-changed-total": "Turn 14 catalog page total changed during the read",
   "item-id-missing": "Turn 14 catalog item ID is missing",
   "item-id-duplicate": "Turn 14 catalog item ID is duplicated",
-  "item-brand-mismatch": "Turn 14 catalog item belongs to a different brand",
   "brand-data-not-array": "Turn 14 brand data is not an array",
   "brand-pagination-invalid": "Turn 14 brand list pagination is invalid or incomplete",
   "brand-id-missing": "Turn 14 brand ID is missing",
@@ -118,6 +117,8 @@ function safeError(error, fallbackReason = "unexpected-catalog-error") {
  * it includes dealer cost for policy evaluation and must not be logged or saved
  * wholesale. `summary` and progress events never include prices or dealer cost.
  * Failure counts use fixed local reason codes and numeric HTTP statuses only.
+ * Explicit brand mismatches are rejected without reassignment. Rejection counts
+ * retain observed faults even if a later guard discards the rest of that brand.
  * Zero-page responses remain rejected until the supplier contract is verified.
  * Relevance is explicit supplier application text, not decoded ACES fitment.
  */
@@ -136,6 +137,7 @@ export async function fetchCommerceCatalog(client, {
     requests: 0, itemPages: 0, pricingPages: 0, itemsScanned: 0, itemsRetained: 0,
     pricesScanned: 0, missingPrices: 0, ambiguousPrices: 0, unavailableMap: 0,
     notPurchasable: 0, supraTargets: 0, bmwTargets: 0, existingSkuOnly: 0,
+    rejectedBrandMismatchItems: 0, brandsWithRejectedItems: 0,
     failureReasonCounts: {}, failureHttpStatusCounts: {}
   };
   let lastRequestAt = null;
@@ -180,7 +182,7 @@ export async function fetchCommerceCatalog(client, {
   summary.brandsSelected = brands.length;
   const items = [];
   for (const brand of brands) {
-    const counters = { scanned: 0, retained: 0, pricesRead: 0, missingPrices: 0, ambiguousPrices: 0 };
+    const counters = { scanned: 0, retained: 0, pricesRead: 0, missingPrices: 0, ambiguousPrices: 0, rejectedBrandMismatchItems: 0 };
     const retained = [];
     let failure = null;
     try {
@@ -192,8 +194,13 @@ export async function fetchCommerceCatalog(client, {
           const id = String(entry?.id ?? "");
           if (!id) throw new CatalogReadError("item-id-missing");
           if (seenIds.has(id)) throw new CatalogReadError("item-id-duplicate");
-          if (entry?.attributes?.brand_id !== undefined && String(entry.attributes.brand_id) !== brand.id) throw new CatalogReadError("item-brand-mismatch");
           seenIds.add(id);
+          if (entry?.attributes?.brand_id !== undefined && String(entry.attributes.brand_id) !== brand.id) {
+            counters.rejectedBrandMismatchItems += 1;
+            summary.rejectedBrandMismatchItems += 1;
+            if (counters.rejectedBrandMismatchItems === 1) summary.brandsWithRejectedItems += 1;
+            continue;
+          }
           const selected = selectItem(entry, brand, identifiers);
           if (selected) retained.push(selected);
         }

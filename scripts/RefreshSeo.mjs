@@ -57,7 +57,7 @@ function nonempty(value) {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-function correctIdentity(seoData, site) {
+function correctIdentity(seoData, site, generated) {
   const corrected = structuredClone(seoData ?? {});
   if (!corrected || typeof corrected !== "object" || Array.isArray(corrected)) throw new Error("Invalid SEO data");
   if (corrected.tags !== undefined && !Array.isArray(corrected.tags)) throw new Error("Invalid SEO tags");
@@ -71,6 +71,10 @@ function correctIdentity(seoData, site) {
     // byte-for-byte, even if they contain a different store's identity.
     const kind = tagKind(tag);
     if (kind === null) continue;
+    // A generated tag already combines the factual product name with this
+    // store's identity. Cross-brand merchandise can legitimately name the
+    // other store inside that product name; preserve an exact generated tag.
+    if (tagText(tag) === generated[kind]) continue;
     let changed = false;
     if (kind === "title" && typeof tag.children === "string") {
       const next = replace(tag.children);
@@ -91,7 +95,8 @@ function correctIdentity(seoData, site) {
  * the runner. Plans and the complete catalog remain in memory only. */
 export function planSeoChange(product, site) {
   const original = product.seoData ?? {};
-  const { seoData: corrected, correctedTags } = correctIdentity(original, site);
+  const generated = productSeo(product, site);
+  const { seoData: corrected, correctedTags } = correctIdentity(original, site, generated);
   const tags = corrected.tags ?? [];
   const state = (kind) => {
     const matching = tags.filter((tag) => tagKind(tag) === kind);
@@ -108,7 +113,6 @@ export function planSeoChange(product, site) {
   const fillDescription = !description.nonempty && !description.disabled;
   const replacements = {};
   if (fillTitle || fillDescription) {
-    const generated = productSeo(product, site);
     if (fillTitle) replacements.title = generated.title;
     if (fillDescription) replacements.description = generated.description;
   }
@@ -141,8 +145,7 @@ export async function verifySeoReadback(client, productId, expectedSeoData, site
     try {
       const readback = (await client.getProduct(productId))?.product;
       if (readback && readback.id === productId &&
-        titleDescriptionSignature(readback.seoData) === titleDescriptionSignature(expectedSeoData) &&
-        correctIdentity(readback.seoData, site).correctedTags === 0) return;
+        titleDescriptionSignature(readback.seoData) === titleDescriptionSignature(expectedSeoData)) return;
       lastError = new Error("SEO readback did not match the intended tags");
     } catch (error) {
       if (error?.status === 401 || error?.status === 403) throw error;

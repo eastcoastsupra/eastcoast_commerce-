@@ -110,7 +110,7 @@ async function main() {
   }
   report.phase = "complete";
   report.completedAt = new Date().toISOString();
-  report.status = catalog.summary.brandsFailed || contexts.some((c) => c.summary.pricing?.errors || c.summary.imports?.errors || c.summary.imports?.stopped) ? "partial" : "complete";
+  report.status = catalog.summary.brandsFailed || catalog.summary.rejectedBrandMismatchItems > 0 || contexts.some((c) => c.summary.pricing?.errors || c.summary.imports?.errors || c.summary.imports?.stopped) ? "partial" : "complete";
   await checkpoint();
   console.log(JSON.stringify({ status: report.status, supplier: report.supplier, sites: report.sites }));
   if (report.status === "partial") process.exitCode = 1;

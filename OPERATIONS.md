@@ -143,6 +143,7 @@ Read the report fields together:
 | Field | Interpretation |
 | --- | --- |
 | `supplier.brandsFailed` | Supplier coverage is incomplete; do not claim a complete supplier scan. |
+| `supplier.rejectedBrandMismatchItems`, `supplier.brandsWithRejectedItems` | Source records whose explicit brand ID conflicts with their feed are excluded; valid records from those feeds can still be processed. These source holds keep the overall result partial. |
 | `proposedPriceRaises`, `proposedSkuRecoveries` | Eligible proposals, including work that may later be applied, conflicted, or capped. Do not add these to applied counts. |
 | `writeAttempts`, `applied` | Attempted patches versus patches whose intended price/SKU was verified. A reported write error may still be followed by successful readback. |
 | `pricesUpdated`, `skusRecovered`, `variantsUpdated` | Overlapping classifications of verified updates, not independent totals to add together. |
@@ -152,7 +153,7 @@ Read the report fields together:
 | `plannedCreates`, `attemptedCreates`, `createdHidden`, `published`, `verified` | Successive import stages; final verification is distinct from a publication request. |
 | `promotions` | Configuration validity and review counts; no promotion application. |
 
-`status: "partial"` exits nonzero when supplier brands fail or site operations report errors/stops. An uncaught error produces `status: "failed"` with phase and numeric HTTP status when available. A cancelled or timed-out process may leave only a `running` checkpoint, and failures before the first checkpoint may leave no report. `status: "complete"` can still contain valid holds, unresolved identities, capped work, or no eligible changes.
+`status: "partial"` exits nonzero when supplier brands fail, inconsistent brand records are excluded, or site operations report errors/stops. An uncaught error produces `status: "failed"` with phase and numeric HTTP status when available. A cancelled or timed-out process may leave only a `running` checkpoint, and failures before the first checkpoint may leave no report. `status: "complete"` can still contain valid holds, unresolved identities, capped work, or no eligible changes.
 
 Resolve authorization errors through the secret configuration without printing the values. After uncertain writes, begin with a fresh read/preview and reconcile current store state; never replay a raw write request to force a result. The report is aggregate and cannot serve as a per-product rollback file. Use Wix's current state and the merchant's own audit process for any deliberate correction.
 

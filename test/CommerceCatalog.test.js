@@ -137,7 +137,6 @@ test("commerce catalog reports fixed failure codes without relaxing pagination o
     { code: "pagination-changed-total", first: page([item("1", "BMW PRIVATE_DATA")], 2), second: page([], 3) },
     { code: "item-id-missing", first: page([item(null, "BMW PRIVATE_DATA")]) },
     { code: "item-id-duplicate", first: page([item("1", "BMW PRIVATE_DATA")], 2), second: page([item("1", "BMW PRIVATE_DATA")], 2) },
-    { code: "item-brand-mismatch", first: page([item("1", "BMW PRIVATE_DATA", { brand_id: "PRIVATE_BRAND" })]) },
     { code: "unexpected-catalog-error", first: page([item("1", "BMW PRIVATE_DATA", { warehouse_availability: [null] })]) }
   ];
   for (const [index, entry] of cases.entries()) await t.test(`${entry.code} ${index}`, async () => {
@@ -211,4 +210,71 @@ test("commerce catalog gives fixed global brand-list errors before requesting an
     });
     assert.equal(source.calls.length, 1);
   }
+});
+
+test("commerce catalog quarantines explicit brand mismatches while retaining valid records across all pages", async () => {
+  const source = fixture({
+    "/v1/brands": page([brand("1", "First"), brand("2", "Second")]),
+    "/v1/items/brand/1?page=1": page([
+      item("valid-1", "BMW part", { brand_id: "1" }),
+      item("PRIVATE_REJECT_1", "BMW PRIVATE_DESCRIPTION", { brand_id: "PRIVATE_WRONG_BRAND", warehouse_availability: [null] })
+    ], 2),
+    "/v1/items/brand/1?page=2": page([
+      item("PRIVATE_REJECT_2", "PRIVATE_DESCRIPTION", { brand_id: "2", category: "Detailing & Care" }),
+      item("valid-2", "Supra part", { brand_id: 1 })
+    ], 2),
+    "/v1/pricing/brand/1?page=1": page([
+      price("valid-1"), price("PRIVATE_REJECT_1", { purchase_cost: "PRIVATE_COST" }),
+      price("valid-2"), price("PRIVATE_REJECT_2", { purchase_cost: "PRIVATE_COST" })
+    ]),
+    "/v1/items/brand/2?page=1": page([item("PRIVATE_REJECT_3", "BMW PRIVATE_DESCRIPTION", { brand_id: "1" })])
+  });
+  const progress = [];
+  const result = await fetchCommerceCatalog(source.client, {
+    existingSkus: ["sku-PRIVATE_REJECT_2"], runtime: source.runtime, onProgress: (event) => progress.push(event)
+  });
+  assert.deepEqual(result.items.map((entry) => [entry.itemId, entry.brandId, entry.map]), [["valid-1", "1", 100], ["valid-2", "1", 100]]);
+  assert.equal(result.summary.brandsCompleted, 2);
+  assert.equal(result.summary.brandsFailed, 0);
+  assert.equal(result.summary.itemPages, 3);
+  assert.equal(result.summary.pricingPages, 1);
+  assert.equal(result.summary.rejectedBrandMismatchItems, 3);
+  assert.equal(result.summary.brandsWithRejectedItems, 2);
+  assert.equal(result.summary.missingPrices, 0);
+  assert.equal(result.summary.ambiguousPrices, 0);
+  assert.deepEqual(result.summary.failureReasonCounts, {});
+  assert.deepEqual(progress.map((event) => [event.status, event.rejectedBrandMismatchItems]), [["complete", 2], ["complete", 1]]);
+  assert.ok(!source.calls.some((call) => call.path.startsWith("/v1/pricing/brand/2")));
+  assert.ok(!JSON.stringify({ items: result.items, summary: result.summary, progress }).includes("PRIVATE"));
+});
+
+test("commerce catalog still discards a quarantined brand on missing IDs, duplicate IDs, or changed pagination", async (t) => {
+  const cases = [
+    { code: "item-id-missing", second: page([item(null, "BMW PRIVATE_DATA", { brand_id: "PRIVATE_WRONG_BRAND" })], 2) },
+    { code: "item-id-duplicate", second: page([item("PRIVATE_REJECT", "BMW part", { brand_id: "1" })], 2) },
+    { code: "pagination-changed-total", second: page([item("other-valid", "BMW part", { brand_id: "1" })], 3) }
+  ];
+  for (const entry of cases) await t.test(entry.code, async () => {
+    const source = fixture({
+      "/v1/brands": page([brand("1", "First"), brand("2", "Second")]),
+      "/v1/items/brand/1?page=1": page([
+        item("valid-1", "BMW part", { brand_id: "1" }),
+        item("PRIVATE_REJECT", "BMW PRIVATE_DATA", { brand_id: "PRIVATE_WRONG_BRAND" })
+      ], 2),
+      "/v1/items/brand/1?page=2": entry.second,
+      "/v1/items/brand/2?page=1": page([item("valid-2", "BMW part", { brand_id: "2" })]),
+      "/v1/pricing/brand/2?page=1": page([price("valid-2")])
+    });
+    const progress = [];
+    const result = await fetchCommerceCatalog(source.client, { runtime: source.runtime, onProgress: (event) => progress.push(event) });
+    assert.deepEqual(result.items.map((item) => item.itemId), ["valid-2"]);
+    assert.equal(result.summary.brandsFailed, 1);
+    assert.equal(result.summary.brandsCompleted, 1);
+    assert.equal(result.summary.rejectedBrandMismatchItems, 1);
+    assert.equal(result.summary.brandsWithRejectedItems, 1);
+    assert.deepEqual(result.summary.failureReasonCounts, { [entry.code]: 1 });
+    assert.equal(progress[0].rejectedBrandMismatchItems, 1);
+    assert.equal(progress[0].reasonCode, entry.code);
+    assert.ok(!JSON.stringify({ summary: result.summary, progress }).includes("PRIVATE"));
+  });
 });
