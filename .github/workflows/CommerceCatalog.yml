@@ -7,6 +7,8 @@ on:
     paths:
       - .github/workflows/CommerceCatalog.yml
   workflow_dispatch:
+  schedule:
+    - cron: '37 */6 * * *'
 
 permissions:
   contents: read
@@ -30,7 +32,7 @@ jobs:
           TURN14_CLIENT_ID: ${{ secrets.TURN14_CLIENT_ID }}
           TURN14_CLIENT_SECRET: ${{ secrets.TURN14_CLIENT_SECRET }}
           WIX_API_KEY: ${{ secrets.WIX_API_KEY }}
-        run: node scripts/SyncCommerce.mjs --brands "CSF,Mishimoto,H&R" --apply --max-updates 10 --max-creates 2
+        run: node scripts/SyncCommerce.mjs --apply --max-updates 1500 --max-creates 0
       - uses: actions/upload-artifact@v4
         if: always()
         with:
