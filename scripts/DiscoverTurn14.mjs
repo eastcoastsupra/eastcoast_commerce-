@@ -11,7 +11,7 @@ const SAMPLE_BRANDS = ["CSF", "Mishimoto", "H&R"];
 const MAX_PAGES = 50;
 const OUTPUT_DIRECTORY = resolve("reports/discovery");
 const PUBLIC_ITEM_KEYS = new Set([
-  "active", "name", "title", "product_name", "product_description", "description",
+  "active", "name", "title", "product_name", "product_description", "part_description", "description",
   "short_description", "long_description", "part_number", "mfr_part_number",
   "manufacturer_part_number", "manufacturer_partnumber", "sku", "mpn", "upc",
   "ean", "gtin", "barcode", "brand", "brand_id", "brand_name", "manufacturer",
@@ -21,7 +21,11 @@ const PUBLIC_ITEM_KEYS = new Set([
   "universal_fitment", "is_universal", "fitments", "fitment", "applications",
   "vehicles", "vehicle_ids", "aces_vehicle_ids", "acesvehicleids", "year", "years",
   "make", "model", "submodel", "engine", "position", "features", "bullets",
-  "images", "image", "image_url", "media", "files", "links", "url"
+  "images", "image", "image_url", "thumbnail", "media", "files", "links", "url",
+  "units_per_sku", "contents", "born_on_date", "regular_stock", "clearance_item",
+  "powersports_indicator", "epa", "prop_65", "not_carb_approved", "carb_eo_number",
+  "carb_acknowledgement_required", "air_freight_prohibited", "ltl_freight_required",
+  "warehouse_availability"
 ]);
 const PRIVATE_KEY = /(?:secret|token|password|authorization|credential|api.?key|client.?id|purchase.?cost|dealer.?cost|wholesale|account|customer)/iu;
 const RETAIL_LIST_NAMES = new Set(["map", "retail", "suggested retail", "msrp"]);
@@ -180,7 +184,7 @@ async function allBrandPages(client, kind, brandId) {
 
 async function publicDocumentationProbe() {
   // No Authorization header, cookies, or client credentials are sent here.
-  const url = `${BASE_URL}/v1/`;
+  const url = `${BASE_URL}/`;
   try {
     const response = await fetch(url, {
       method: "GET", redirect: "manual", headers: { accept: "application/json, text/html" },
@@ -195,13 +199,17 @@ async function publicDocumentationProbe() {
       links = providedLinks(body);
       responseSchema = schema([body]);
     } catch {
-      links = [...text.matchAll(/href\s*=\s*["']([^"']+)["']/giu)]
-        .map((match) => ({ path: "html.href", url: publicUrl(match[1]) }))
+      links = [...text.matchAll(/(?:href|src)\s*=\s*["']([^"']+)["']/giu)]
+        .map((match) => {
+          try { return { path: "html.reference", url: publicUrl(new URL(match[1], url).href) }; }
+          catch { return { path: "html.reference", url: null }; }
+        })
         .filter((link) => link.url);
     }
     const location = publicUrl(response.headers.get("location"));
     if (location) links.push({ path: "response.location", url: location });
-    return { url, status: response.status, contentType, links, responseSchema };
+    const apiRouteLiterals = [...new Set(text.match(/\/v1\/[a-z][a-z0-9_/{}/.:-]*/giu) ?? [])].slice(0, 200);
+    return { url, status: response.status, contentType, links, responseSchema, apiRouteLiterals };
   } catch {
     return { url, status: null, error: "Public documentation probe unavailable." };
   }
