@@ -1,0 +1,38 @@
+name: Store Product SEO Refresh
+
+on:
+  push:
+    branches:
+      - commerce-expansion-20261103
+    paths:
+      - .github/workflows/CommerceSeo.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eastcoast-product-seo
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm run validate
+      - name: Fill missing product SEO and correct store identity
+        env:
+          WIX_API_KEY: ${{ secrets.WIX_API_KEY }}
+        run: node scripts/RefreshSeo.mjs --apply --max-updates 2
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: product-seo-summary-${{ github.run_id }}
+          path: reports/seo/Summary.json
+          retention-days: 30
+          if-no-files-found: warn

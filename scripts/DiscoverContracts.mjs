@@ -13,9 +13,11 @@ const client = new Turn14Client({
 const itemId = "21466"; // Mishimoto MMRAD-SUP-93TX from the actual supplier feed.
 const paths = [
   `/v1/inventory/${itemId}`,
-  `/v1/data/${itemId}`,
-  `/v1/fitment/${itemId}`,
-  `/v1/items/${itemId}`
+  `/v1/inventory/brand/45?page=1`,
+  `/v1/items/data/${itemId}`,
+  `/v1/items/fitment/${itemId}`,
+  `/v1/items/${itemId}/data`,
+  `/v1/items/${itemId}/fitment`
 ];
 function schema(value, path = "", output = {}) {
   const type = value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
@@ -30,7 +32,12 @@ const results = [];
 for (const path of paths) {
   try {
     const data = await client.get(path);
-    results.push({ path, status: 200, schema: schema(data) });
+    results.push({
+      path, status: 200, schema: schema(data),
+      returnedIds: Array.isArray(data?.data) ? data.data.slice(0, 3).map((entry) => String(entry.id)) : undefined,
+      sampleCount: Array.isArray(data?.data) ? data.data.length : undefined,
+      totalPages: data?.meta?.total_pages
+    });
   } catch (error) {
     results.push({ path, status: Number.isInteger(error?.status) ? error.status : null });
     if ([401, 403].includes(error?.status)) break;
