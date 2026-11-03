@@ -1,62 +1,45 @@
-# East Coast Commerce - Turn 14 MAP Sync
+# East Coast Commerce
 
-A controlled integration for comparing and updating Wix Catalog V1 product prices from Turn 14 MAP data.
+Turn 14 catalog, pricing, product SEO, and manufacturer promotion checks for East Coast Supra and East Coast BMW on Wix Catalog V1.
 
-## Included sites
-
-| Key | Store | Wix site ID |
+| Store | Key | Wix site ID |
 |---|---|---|
-| `eastcoastsupra` | eastcoastsupra.com | `c657a976-ab71-452c-b451-6ef24770c9f4` |
-| `ecbmw` | ecbmw.com | `82e4ec70-32f8-4d6d-a6a6-e4b582cb5104` |
+| eastcoastsupra.com | `eastcoastsupra` | `c657a976-ab71-452c-b451-6ef24770c9f4` |
+| ecbmw.com | `ecbmw` | `82e4ec70-32f8-4d6d-a6a6-e4b582cb5104` |
 
-Both sites are configured as Wix Stores Catalog V1.
+## Operations
 
-## Safety model
+Read [OPERATIONS.md](OPERATIONS.md) for commands, caps, report interpretation, and remaining import prerequisites.
 
-- Runs are dry-run unless `--apply` is supplied.
-- Default mode is `raise-only`; prices above MAP are preserved.
-- Lowering a price requires both `--mode exact-map` and `--allow-price-decrease`.
-- Products are matched only by exact normalized Wix SKU against a Turn 14 part number, manufacturer part number, barcode, or alternate part number.
-- Missing SKUs, ambiguous matches, variants, active discounts, hidden products, inactive items, non-purchasable items, and products without MAP are skipped by default.
-- Each apply run is capped at 10 changes per site unless `--max-updates` is changed.
-- Every run writes a complete JSON audit report under `reports/`.
+- **Catalog and pricing:** `.github/workflows/CommerceCatalog.yml` scans every supplier brand, updates verified existing products and exact variants, and evaluates import eligibility. The schedule is every six hours at minute 37 UTC after this workflow is on the default branch. The configured job allows up to 1,500 price/SKU attempts per store; new-product creation is disabled until shipping units are verified.
+- **SEO:** `.github/workflows/CommerceSeo.yml` fills missing product titles and meta descriptions and corrects copied store identity. Existing custom metadata and structured data are preserved.
+- **Promotions:** `config/Promotions.json` and `src/sync/promotionCheck.js` validate documented customer offers in review-only mode. Dealer-cost changes do not activate retail sales. Verified eligible items, dates, terms, and a reliable sale-expiry mechanism are required before activation.
+- **Legacy Chemical Guys workflow:** superseded by the broader catalog job. Its old schedule and write operation are disabled.
 
-## Requirements
+## Matching and pricing
 
-- Node.js 20.11 or newer.
-- Turn 14 API client ID and client secret.
-- A Wix API key authorized to read and manage store products for both sites.
+Existing regular-price changes are raise-only. Prices already above the current verified MAP or manufacturer retail reference are preserved. Active merchant discounts, hidden products, ambiguous identities, uncertain variants, and unverified package quantities are held for review.
 
-Copy the environment template and enter credentials locally:
+New-product eligibility requires explicit supplier Supra/BMW application text or universal detailing relevance. Undecoded vehicle IDs and shared engines do not establish fitment. Publication also requires a verified selling unit, price, source media, inventory, shipping weight and units, and any relevant sale restrictions.
 
-```bash
-cp .env.example .env
-```
+## Credentials and reports
 
-Never commit `.env` or credentials.
-
-## Validate locally
-
-```bash
-npm run validate
-```
-
-## Chemical Guys dry run
-
-```bash
-npm run dry-run:chemical-guys
-```
-
-## Apply raises to MAP
-
-```bash
-npm run live:chemical-guys
-```
-
-The live workflow runs every six hours. It only raises exact-match Chemical Guys products that are below Turn 14 MAP, skips protected product states, caps updates per site, and uploads a JSON audit report.
-
-Required GitHub Actions repository secrets:
+Use these repository Actions secrets:
 
 - `TURN14_CLIENT_ID`
 - `TURN14_CLIENT_SECRET`
 - `WIX_API_KEY`
+
+Never commit credentials or `.env` files. Production catalog responses remain in runner memory. Workflow logs and artifacts contain aggregate counts and fixed hold reasons, not raw catalog records, product identifiers, prices, purchase costs, or credentials.
+
+## Local validation and preview
+
+Node.js 20.11 or newer is required. Workflows use Node.js 22.
+
+```bash
+npm run validate
+node scripts/SyncCommerce.mjs
+node scripts/RefreshSeo.mjs
+```
+
+Preview commands are read-only. Apply commands require explicit positive caps, as documented in OPERATIONS.md. Read the generated summaries before changing caps or enabling imports.

@@ -8,7 +8,7 @@ async function listJavaScriptFiles(directory) {
     const path = `${directory}/${entry.name}`;
     if (entry.isDirectory()) {
       files.push(...(await listJavaScriptFiles(path)));
-    } else if (entry.isFile() && entry.name.endsWith(".js")) {
+    } else if (entry.isFile() && /\.(?:js|mjs)$/u.test(entry.name)) {
       files.push(path);
     }
   }
@@ -32,3 +32,4 @@ for (const file of files) {
 if (!process.exitCode) {
   console.log(`Syntax check passed for ${files.length} JavaScript files.`);
 }
+
