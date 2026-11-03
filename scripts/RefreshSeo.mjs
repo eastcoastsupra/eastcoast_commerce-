@@ -129,6 +129,29 @@ function titleDescriptionSignature(seoData) {
     .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))));
 }
 
+/** Retry only verification reads to tolerate Wix's observed read-after-write
+ * lag. A permanent mismatch still fails after the bounded retry window. */
+export async function verifySeoReadback(client, productId, expectedSeoData, site, {
+  delays = [1000, 2000, 4000, 8000],
+  wait = (milliseconds) => new Promise((done) => setTimeout(done, milliseconds))
+} = {}) {
+  let lastError;
+  for (let attempt = 0; attempt <= delays.length; attempt += 1) {
+    if (attempt > 0) await wait(delays[attempt - 1]);
+    try {
+      const readback = (await client.getProduct(productId))?.product;
+      if (readback && readback.id === productId &&
+        titleDescriptionSignature(readback.seoData) === titleDescriptionSignature(expectedSeoData) &&
+        correctIdentity(readback.seoData, site).correctedTags === 0) return;
+      lastError = new Error("SEO readback did not match the intended tags");
+    } catch (error) {
+      if (error?.status === 401 || error?.status === 403) throw error;
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
+
 function counts() {
   return {
     allProducts: 0, visibleProducts: 0, hiddenOrUnconfirmedProducts: 0,
@@ -217,12 +240,7 @@ async function processNext(context, options) {
 
   stage = "verify-seo";
   try {
-    const readback = (await context.client.getProduct(current.id))?.product;
-    if (!readback || readback.id !== current.id ||
-      titleDescriptionSignature(readback.seoData) !== titleDescriptionSignature(plan.seoData) ||
-      correctIdentity(readback.seoData, context.site).correctedTags !== 0) {
-      throw new Error("SEO readback did not match the intended tags");
-    }
+    await verifySeoReadback(context.client, current.id, plan.seoData, context.site);
     count.verifiedUpdates += 1;
   } catch (error) {
     recordError(context, error, "verificationErrors");

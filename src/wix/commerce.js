@@ -194,6 +194,32 @@ export class WixCommerceClient extends WixCatalogV1Client {
     return this.request(`${READ_BASE}/products/${encodeURIComponent(id)}?includeMerchantSpecificData=true`, "GET");
   }
 
+  async findProductsBySku(sku) {
+    text(sku, "sku", 40);
+    if (sku.length > 40) throw new RangeError("sku exceeds 40 characters");
+    // The official V1 Filter and Sort table supports top-level sku with $eq.
+    // This does not search variant SKUs. includeVariants only expands results.
+    // https://dev.wix.com/docs/api-reference/business-solutions/stores/catalog-v1/catalog/query-products
+    const result = await this.request(`${READ_BASE}/products/query`, "POST", {
+      query: { filter: JSON.stringify({ sku: { $eq: sku } }), paging: { limit: 100 } },
+      includeHiddenProducts: true,
+      includeVariants: true
+    });
+    if (!Array.isArray(result?.products)) throw new TypeError("Wix SKU lookup is missing products");
+    const products = result.products;
+    let total = result.totalResults;
+    if (typeof total === "string" && /^(?:0|[1-9][0-9]*)$/u.test(total)) total = Number(total);
+    if (total !== undefined && (!Number.isSafeInteger(total) || total < 0)) {
+      throw new Error("Wix SKU lookup returned an invalid total");
+    }
+    if (products.length >= 100 || (total !== undefined && total > products.length) ||
+      result.hasMore === true || result.hasNext === true || result.metadata?.hasMore === true ||
+      result.metadata?.hasNext === true || result.metadata?.cursors?.next) {
+      throw new Error("Wix SKU lookup may be incomplete; reconcile the full catalog before creation");
+    }
+    return products;
+  }
+
   async queryAll(url, field, options = {}) {
     const items = [];
     const limit = 100;

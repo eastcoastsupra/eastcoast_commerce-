@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { WixCommerceClient, buildProductPayload, mergeSeoData } from "../src/wix/commerce.js";
+import { SITES } from "../src/config/sites.js";
+import { verifySeoReadback } from "../scripts/RefreshSeo.mjs";
 
 function client() {
   return new WixCommerceClient({ apiKey: "test-key", siteId: "test-site", httpRuntime: { retries: 3, retryBaseMs: 0 } });
@@ -156,6 +158,76 @@ test("fresh product read supports preserving current SEO immediately before a pa
   assert.equal(calls[0].url, "https://www.wixapis.com/stores-reader/v1/products/p1?includeMerchantSpecificData=true");
   assert.equal(calls[0].method, "GET");
   assert.equal(calls[0].body, undefined);
+});
+
+test("exact top-level SKU lookup includes hidden matches and variants without broadening the filter", async (t) => {
+  const products = [{ id: "p1", sku: "EXACT-123", visible: true }, { id: "p2", sku: "EXACT-123", visible: false }];
+  const calls = mockResponses(t, [{ products, totalResults: "2" }]);
+  assert.deepEqual(await client().findProductsBySku("EXACT-123"), products);
+  assert.equal(calls[0].url, "https://www.wixapis.com/stores-reader/v1/products/query");
+  assert.deepEqual(calls[0].body, {
+    query: { filter: JSON.stringify({ sku: { $eq: "EXACT-123" } }), paging: { limit: 100 } },
+    includeHiddenProducts: true, includeVariants: true
+  });
+});
+
+test("SKU lookup refuses missing arrays, saturated results, and incomplete metadata before creation", async (t) => {
+  mockResponses(t, [
+    {},
+    { products: Array.from({ length: 100 }, (_, index) => ({ id: String(index) })), totalResults: 100 },
+    { products: [{ id: "p1" }], totalResults: 2 },
+    { products: [{ id: "p1" }], metadata: { hasMore: true } }
+  ]);
+  const commerce = client();
+  await assert.rejects(commerce.findProductsBySku("EXACT-123"), /missing products/);
+  for (let index = 0; index < 3; index += 1) {
+    await assert.rejects(commerce.findProductsBySku("EXACT-123"), /may be incomplete/);
+  }
+});
+
+test("SEO verification tolerates stale reads with GET-only delays and preserves exact signatures", async () => {
+  const expected = { tags: [
+    { type: "title", children: "Exact title | East Coast Supra" },
+    { type: "meta", props: { name: "description", content: "Exact description." } }
+  ] };
+  let reads = 0;
+  let writes = 0;
+  const delays = [];
+  const wix = {
+    async getProduct(id) {
+      reads += 1;
+      return { product: { id, seoData: reads < 3 ? { tags: [] } : expected } };
+    },
+    async updateProduct() { writes += 1; }
+  };
+  await verifySeoReadback(wix, "p1", expected, SITES.eastcoastsupra, { wait: async (milliseconds) => delays.push(milliseconds) });
+  assert.equal(reads, 3);
+  assert.equal(writes, 0);
+  assert.deepEqual(delays, [1000, 2000]);
+});
+
+test("SEO verification fails a permanent mismatch after the bounded read window", async () => {
+  let reads = 0;
+  const delays = [];
+  await assert.rejects(verifySeoReadback({ async getProduct(id) {
+    reads += 1;
+    return { product: { id, seoData: { tags: [] } } };
+  } }, "p1", { tags: [{ type: "title", children: "Expected title" }] }, SITES.eastcoastsupra, {
+    wait: async (milliseconds) => delays.push(milliseconds)
+  }), /did not match/);
+  assert.equal(reads, 5);
+  assert.deepEqual(delays, [1000, 2000, 4000, 8000]);
+});
+
+test("SEO verification stops immediately on authorization failure", async () => {
+  let reads = 0;
+  const delays = [];
+  await assert.rejects(verifySeoReadback({ async getProduct() {
+    reads += 1;
+    throw Object.assign(new Error("Permission denied"), { status: 403 });
+  } }, "p1", {}, SITES.eastcoastsupra, { wait: async (milliseconds) => delays.push(milliseconds) }), { status: 403 });
+  assert.equal(reads, 1);
+  assert.deepEqual(delays, []);
 });
 
 test("ambiguous create failure is not retried automatically even when transport retries are configured", async (t) => {
