@@ -1,0 +1,41 @@
+name: Turn 14 Catalog Discovery
+
+on:
+  push:
+    branches:
+      - commerce-expansion-20261103
+    paths:
+      - .github/workflows/CatalogDiscovery.yml
+      - scripts/DiscoverTurn14.mjs
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: turn14-catalog-discovery
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm run validate
+      - name: Read supplier catalog and public retail pricing
+        env:
+          TURN14_CLIENT_ID: ${{ secrets.TURN14_CLIENT_ID }}
+          TURN14_CLIENT_SECRET: ${{ secrets.TURN14_CLIENT_SECRET }}
+          TURN14_BASE_URL: https://api.turn14.com
+        run: node scripts/DiscoverTurn14.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: turn14-catalog-discovery-${{ github.run_id }}
+          path: reports/discovery/*.json
+          retention-days: 14
+          if-no-files-found: warn
