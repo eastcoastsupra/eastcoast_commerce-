@@ -1,0 +1,102 @@
+name: Wix Authentication Diagnostic
+
+on:
+  push:
+    branches:
+      - diagnose-wix-auth-20261103
+    paths:
+      - .github/workflows/WixAuthentication.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Check Wix read access for both stores
+        shell: bash
+        env:
+          WIX_API_KEY: ${{ secrets.WIX_API_KEY }}
+        run: |
+          node --input-type=module <<'NODE'
+          const key = (process.env.WIX_API_KEY ?? "").trim();
+          const present = Boolean(key);
+          
+          console.log(JSON.stringify({
+            secretPresent: present,
+            surroundingQuotes: /^(["'])[\s\S]*\1$/.test(key),
+            bearerPrefix: /^Bearer\s+/i.test(key),
+            assignmentPrefix: /^WIX_API_KEY\s*=/i.test(key)
+          }));
+          
+          const stores = [
+            { name: "East Coast Supra", id: "c657a976-ab71-452c-b451-6ef24770c9f4" },
+            { name: "East Coast BMW", id: "82e4ec70-32f8-4d6d-a6a6-e4b582cb5104" }
+          ];
+          
+          let failed = !present;
+          
+          for (const store of stores) {
+            let status = null;
+            let applicationErrorCode = null;
+            let success = false;
+          
+            if (present) {
+              try {
+                const response = await fetch(
+                  "https://www.wixapis.com/stores-reader/v1/products/query",
+                  {
+                    method: "POST",
+                    headers: {
+                      authorization: key,
+                      "wix-site-id": store.id,
+                      "content-type": "application/json",
+                      accept: "application/json"
+                    },
+                    body: "{}",
+                    redirect: "error",
+                    signal: AbortSignal.timeout(30000)
+                  }
+                );
+          
+                status = response.status;
+                success = response.ok;
+          
+                if (success) {
+                  await response.body?.cancel();
+                } else {
+                  const body = await response.json().catch(() => null);
+                  const candidate =
+                    body?.details?.applicationError?.code ??
+                    body?.applicationError?.code;
+          
+                  if (
+                    typeof candidate === "string" &&
+                    /^[A-Z][A-Z0-9_]{0,63}$/.test(candidate) &&
+                    candidate !== key
+                  ) {
+                    applicationErrorCode = candidate;
+                  }
+                }
+              } catch {
+                success = false;
+              }
+            }
+          
+            console.log(JSON.stringify({
+              store: store.name,
+              status,
+              applicationErrorCode,
+              success
+            }));
+            failed ||= !success;
+          }
+          
+          process.exitCode = failed ? 1 : 0;
+          NODE
