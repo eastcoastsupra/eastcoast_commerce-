@@ -106,7 +106,7 @@ test("commerce catalog aborts globally for authorization errors without exposing
   for (const status of [401, 403]) {
     const error = Object.assign(new Error("PRIVATE_SECRET"), { status, body: { purchase_cost: "PRIVATE_COST" } });
     const source = fixture({ "/v1/brands": page([brand("1", "First"), brand("2", "Second")]), "/v1/items/brand/1?page=1": error });
-    await assert.rejects(fetchCommerceCatalog(source.client, { runtime: source.runtime }), (failure) => failure.status === status && !String(failure).includes("PRIVATE") && failure.body === undefined);
+    await assert.rejects(fetchCommerceCatalog(source.client, { runtime: source.runtime }), (failure) => failure.status === status && failure.reasonCode === "http-error" && !String(failure).includes("PRIVATE") && failure.body === undefined && failure.cause === undefined);
     assert.equal(source.calls.length, 2);
   }
 });
@@ -123,4 +123,92 @@ test("commerce catalog discards a failed brand, continues other brands, and refu
   assert.equal(result.summary.brandsCompleted, 1);
   assert.deepEqual(result.items.map((entry) => entry.itemId), ["2"]);
   await assert.rejects(fetchCommerceCatalog(source.client, { minRequestIntervalMs: 249 }), /at least 250/u);
+});
+
+test("commerce catalog reports fixed failure codes without relaxing pagination or identity validation", async (t) => {
+  const cases = [
+    { code: "response-data-not-array", first: { data: { private: "PRIVATE_DATA" }, meta: { total_pages: 1 } } },
+    { code: "pagination-zero-pages-empty", first: page([], 0) },
+    { code: "pagination-zero-pages-nonempty", first: page([item("1", "BMW PRIVATE_DATA")], 0) },
+    { code: "pagination-invalid-total", first: page([], "PRIVATE_TOTAL") },
+    { code: "pagination-invalid-total", first: page([], -1) },
+    { code: "pagination-invalid-total", first: page([], 1.5) },
+    { code: "pagination-page-limit", first: page([], 1001) },
+    { code: "pagination-changed-total", first: page([item("1", "BMW PRIVATE_DATA")], 2), second: page([], 3) },
+    { code: "item-id-missing", first: page([item(null, "BMW PRIVATE_DATA")]) },
+    { code: "item-id-duplicate", first: page([item("1", "BMW PRIVATE_DATA")], 2), second: page([item("1", "BMW PRIVATE_DATA")], 2) },
+    { code: "item-brand-mismatch", first: page([item("1", "BMW PRIVATE_DATA", { brand_id: "PRIVATE_BRAND" })]) },
+    { code: "unexpected-catalog-error", first: page([item("1", "BMW PRIVATE_DATA", { warehouse_availability: [null] })]) }
+  ];
+  for (const [index, entry] of cases.entries()) await t.test(`${entry.code} ${index}`, async () => {
+    const source = fixture({
+      "/v1/brands": page([brand("1", "First"), brand("2", "Second")]),
+      "/v1/items/brand/1?page=1": entry.first,
+      ...(entry.second ? { "/v1/items/brand/1?page=2": entry.second } : {}),
+      "/v1/items/brand/2?page=1": page([item("2", "BMW valid part")]),
+      "/v1/pricing/brand/2?page=1": page([price("2")])
+    });
+    const progress = [];
+    const result = await fetchCommerceCatalog(source.client, { runtime: source.runtime, onProgress: (event) => progress.push(event) });
+    assert.deepEqual(result.items.map((value) => value.itemId), ["2"]);
+    assert.equal(result.summary.brandsFailed, 1);
+    assert.equal(result.summary.brandsCompleted, 1);
+    assert.deepEqual(result.summary.failureReasonCounts, { [entry.code]: 1 });
+    assert.deepEqual(result.summary.failureHttpStatusCounts, {});
+    assert.equal(progress[0].reasonCode, entry.code);
+    assert.equal(progress[0].httpStatus, null);
+    assert.ok(!JSON.stringify({ summary: result.summary, progress }).includes("PRIVATE"));
+  });
+});
+
+test("commerce catalog aggregates HTTP statuses and sanitizes untrusted error codes, bodies, causes, and messages", async () => {
+  const remoteError = (status) => Object.assign(new Error("PRIVATE_MESSAGE"), {
+    status, reasonCode: "PRIVATE_CODE", code: "PRIVATE_CODE", body: "PRIVATE_BODY", cause: new Error("PRIVATE_CAUSE")
+  });
+  const source = fixture({
+    "/v1/brands": page([brand("1", "First"), brand("2", "Second"), brand("3", "Third"), brand("4", "Fourth")]),
+    "/v1/items/brand/1?page=1": remoteError(503),
+    "/v1/items/brand/2?page=1": remoteError(503),
+    "/v1/items/brand/3?page=1": remoteError(404),
+    "/v1/items/brand/4?page=1": remoteError("PRIVATE_STATUS")
+  });
+  const progress = [];
+  const result = await fetchCommerceCatalog(source.client, { runtime: source.runtime, onProgress: (event) => progress.push(event) });
+  assert.equal(result.summary.brandsFailed, 4);
+  assert.deepEqual(result.summary.failureReasonCounts, { "http-error": 3, "request-failed": 1 });
+  assert.deepEqual(result.summary.failureHttpStatusCounts, { 404: 1, 503: 2 });
+  assert.deepEqual(progress.map((event) => event.httpStatus), [503, 503, 404, null]);
+  assert.ok(!JSON.stringify({ summary: result.summary, progress }).includes("PRIVATE"));
+});
+
+test("commerce catalog also rejects and diagnoses zero-page pricing without retaining a partial brand", async () => {
+  const source = fixture({
+    "/v1/brands": page([brand("1", "First")]),
+    "/v1/items/brand/1?page=1": page([item("1", "BMW part")]),
+    "/v1/pricing/brand/1?page=1": page([], 0)
+  });
+  const result = await fetchCommerceCatalog(source.client, { runtime: source.runtime });
+  assert.deepEqual(result.items, []);
+  assert.equal(result.summary.brandsCompleted, 0);
+  assert.deepEqual(result.summary.failureReasonCounts, { "pagination-zero-pages-empty": 1 });
+});
+
+test("commerce catalog gives fixed global brand-list errors before requesting any catalog records", async () => {
+  const cases = [
+    ["brand-data-not-array", { data: { private: "PRIVATE_DATA" } }],
+    ["brand-pagination-invalid", page([brand("1", "First")], 2)],
+    ["brand-id-missing", page([brand(null, "PRIVATE_NAME")])],
+    ["brand-name-missing", page([brand("PRIVATE_ID", " ")])],
+    ["brand-id-duplicate", page([brand("PRIVATE_ID", "First"), brand("PRIVATE_ID", "Second")])]
+  ];
+  for (const [code, response] of cases) {
+    const source = fixture({ "/v1/brands": response });
+    await assert.rejects(fetchCommerceCatalog(source.client, { runtime: source.runtime }), (error) => {
+      assert.equal(error.reasonCode, code);
+      assert.equal(error.status, null);
+      assert.ok(!String(error).includes("PRIVATE"));
+      return true;
+    });
+    assert.equal(source.calls.length, 1);
+  }
 });

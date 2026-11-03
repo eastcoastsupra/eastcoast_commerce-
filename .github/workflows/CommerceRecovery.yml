@@ -1,0 +1,41 @@
+name: Bounded Supplier Catalog Recovery
+
+on:
+  push:
+    branches:
+      - commerce-expansion-20261103
+    paths:
+      - .github/workflows/CommerceRecovery.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eastcoast-commerce-writes
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm run validate
+      - name: Recheck the two failed supplier windows and reconcile valid prices
+        env:
+          TURN14_CLIENT_ID: ${{ secrets.TURN14_CLIENT_ID }}
+          TURN14_CLIENT_SECRET: ${{ secrets.TURN14_CLIENT_SECRET }}
+          WIX_API_KEY: ${{ secrets.WIX_API_KEY }}
+          TARGET_BRANDS: "Alta,American Truxx,AMP Research,AMP Tires,AMS,Anderson Composites,Answer,Antigravity Batteries,ANZO,APR,ARB,ARP,Arrowhead,Artec Industries,AST,Athena,ATI,ATS Diesel,Atturo Tire,AutoMeter,Counteract,Covercraft,CP Pistons,CRG Constructors,CruzTOOLS,CSF,CTEK,Cusco,Cycra,Cylinder Works,DBA,DDP,DeatschWerks,DEI,DFC,Diamond Eye Performance,Dinan,Diode Dynamics,Dirty Life,DKM Clutch"
+        run: node scripts/SyncCommerce.mjs --brands "$TARGET_BRANDS" --apply --max-updates 100 --max-creates 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: commerce-recovery-summary-${{ github.run_id }}
+          path: reports/commerce/Summary.json
+          retention-days: 30
+          if-no-files-found: warn

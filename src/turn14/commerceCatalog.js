@@ -77,17 +77,48 @@ function selectItem(item, brand, existingSkus) {
   };
 }
 
-function safeError(error) {
-  const status = Number.isInteger(error?.status) ? error.status : null;
-  const result = new Error(status ? `Turn 14 catalog read failed (HTTP ${status}).` : "Turn 14 catalog read or response validation failed.");
-  result.status = status;
-  return result;
+const FAILURE_MESSAGES = Object.freeze({
+  "http-error": "Turn 14 catalog HTTP request failed",
+  "request-failed": "Turn 14 catalog request failed without an HTTP status",
+  "unexpected-catalog-error": "Turn 14 catalog response processing failed",
+  "response-data-not-array": "Turn 14 catalog data is not an array",
+  "pagination-zero-pages-empty": "Turn 14 catalog reported zero pages with empty data",
+  "pagination-zero-pages-nonempty": "Turn 14 catalog reported zero pages with nonempty data",
+  "pagination-invalid-total": "Turn 14 catalog page total is invalid",
+  "pagination-page-limit": "Turn 14 catalog page total exceeds the safety limit",
+  "pagination-changed-total": "Turn 14 catalog page total changed during the read",
+  "item-id-missing": "Turn 14 catalog item ID is missing",
+  "item-id-duplicate": "Turn 14 catalog item ID is duplicated",
+  "item-brand-mismatch": "Turn 14 catalog item belongs to a different brand",
+  "brand-data-not-array": "Turn 14 brand data is not an array",
+  "brand-pagination-invalid": "Turn 14 brand list pagination is invalid or incomplete",
+  "brand-id-missing": "Turn 14 brand ID is missing",
+  "brand-name-missing": "Turn 14 brand name is missing",
+  "brand-id-duplicate": "Turn 14 brand ID is duplicated"
+});
+
+// Only locally constructed errors may carry a diagnostic code. Never preserve
+// an upstream error's message, body, cause, URL, or arbitrary code in reports.
+class CatalogReadError extends Error {
+  constructor(reasonCode, status = null) {
+    super(`${FAILURE_MESSAGES[reasonCode]}${status === null ? "" : ` (HTTP ${status})`}.`);
+    this.reasonCode = reasonCode;
+    this.status = status;
+  }
+}
+
+function safeError(error, fallbackReason = "unexpected-catalog-error") {
+  const status = Number.isInteger(error?.status) && error.status >= 100 && error.status <= 599 ? error.status : null;
+  const reasonCode = error instanceof CatalogReadError ? error.reasonCode : status === null ? fallbackReason : "http-error";
+  return new CatalogReadError(reasonCode, status);
 }
 
 /**
  * Reads only known brand/item/pricing routes. `items` is private runtime data:
  * it includes dealer cost for policy evaluation and must not be logged or saved
  * wholesale. `summary` and progress events never include prices or dealer cost.
+ * Failure counts use fixed local reason codes and numeric HTTP statuses only.
+ * Zero-page responses remain rejected until the supplier contract is verified.
  * Relevance is explicit supplier application text, not decoded ACES fitment.
  */
 export async function fetchCommerceCatalog(client, {
@@ -104,23 +135,26 @@ export async function fetchCommerceCatalog(client, {
     brandsTotal: 0, brandsSelected: 0, brandsCompleted: 0, brandsFailed: 0,
     requests: 0, itemPages: 0, pricingPages: 0, itemsScanned: 0, itemsRetained: 0,
     pricesScanned: 0, missingPrices: 0, ambiguousPrices: 0, unavailableMap: 0,
-    notPurchasable: 0, supraTargets: 0, bmwTargets: 0, existingSkuOnly: 0
+    notPurchasable: 0, supraTargets: 0, bmwTargets: 0, existingSkuOnly: 0,
+    failureReasonCounts: {}, failureHttpStatusCounts: {}
   };
   let lastRequestAt = null;
   async function read(path) {
     if (lastRequestAt !== null) await runtime.sleep(Math.max(0, minRequestIntervalMs - (runtime.now() - lastRequestAt)));
     lastRequestAt = runtime.now();
     summary.requests += 1;
-    try { return await client.get(path); } catch (error) { throw safeError(error); }
+    try { return await client.get(path); } catch (error) { throw safeError(error, "request-failed"); }
   }
   async function pages(kind, brandId, consume) {
     let totalPages = 1;
     for (let page = 1; page <= totalPages; page += 1) {
       const response = await read(`/v1/${kind}/brand/${encodeURIComponent(brandId)}?page=${page}`);
       const total = Number(response?.meta?.total_pages ?? 1);
-      if (!Array.isArray(response?.data) || !Number.isInteger(total) || total < 1 || total > 1000 || (page > 1 && total !== totalPages)) {
-        throw new Error("Invalid, changed, or excessive catalog pagination.");
-      }
+      if (!Array.isArray(response?.data)) throw new CatalogReadError("response-data-not-array");
+      if (!Number.isInteger(total) || total < 0) throw new CatalogReadError("pagination-invalid-total");
+      if (total === 0) throw new CatalogReadError(response.data.length === 0 ? "pagination-zero-pages-empty" : "pagination-zero-pages-nonempty");
+      if (total > 1000) throw new CatalogReadError("pagination-page-limit");
+      if (page > 1 && total !== totalPages) throw new CatalogReadError("pagination-changed-total");
       totalPages = total;
       summary[kind === "items" ? "itemPages" : "pricingPages"] += 1;
       consume(response.data);
@@ -128,11 +162,12 @@ export async function fetchCommerceCatalog(client, {
   }
 
   const response = await read("/v1/brands");
-  if (!Array.isArray(response?.data) || Number(response?.meta?.total_pages ?? 1) !== 1) throw new Error("Invalid or incomplete Turn 14 brand list.");
+  if (!Array.isArray(response?.data)) throw new CatalogReadError("brand-data-not-array");
+  if (Number(response?.meta?.total_pages ?? 1) !== 1) throw new CatalogReadError("brand-pagination-invalid");
   const allBrands = response.data.map((brand) => ({ id: String(brand?.id ?? ""), name: string(brand?.attributes?.name) }));
-  if (allBrands.some((brand) => !brand.id || !brand.name.trim()) || new Set(allBrands.map((brand) => brand.id)).size !== allBrands.length) {
-    throw new Error("Missing or duplicate brand identity.");
-  }
+  if (allBrands.some((brand) => !brand.id)) throw new CatalogReadError("brand-id-missing");
+  if (allBrands.some((brand) => !brand.name.trim())) throw new CatalogReadError("brand-name-missing");
+  if (new Set(allBrands.map((brand) => brand.id)).size !== allBrands.length) throw new CatalogReadError("brand-id-duplicate");
   summary.brandsTotal = allBrands.length;
   let brands = allBrands;
   if (brandNames !== undefined) {
@@ -155,9 +190,9 @@ export async function fetchCommerceCatalog(client, {
           counters.scanned += 1;
           summary.itemsScanned += 1;
           const id = String(entry?.id ?? "");
-          if (!id || seenIds.has(id) || (entry?.attributes?.brand_id !== undefined && String(entry.attributes.brand_id) !== brand.id)) {
-            throw new Error("Missing, duplicate, or inconsistent catalog identity.");
-          }
+          if (!id) throw new CatalogReadError("item-id-missing");
+          if (seenIds.has(id)) throw new CatalogReadError("item-id-duplicate");
+          if (entry?.attributes?.brand_id !== undefined && String(entry.attributes.brand_id) !== brand.id) throw new CatalogReadError("item-brand-mismatch");
           seenIds.add(id);
           const selected = selectItem(entry, brand, identifiers);
           if (selected) retained.push(selected);
@@ -199,7 +234,9 @@ export async function fetchCommerceCatalog(client, {
     }
     if (failure) {
       summary.brandsFailed += 1;
-      await onProgress({ brandId: brand.id, brand: brand.name, status: "failed", httpStatus: failure.status, ...counters });
+      summary.failureReasonCounts[failure.reasonCode] = (summary.failureReasonCounts[failure.reasonCode] ?? 0) + 1;
+      if (failure.status !== null) summary.failureHttpStatusCounts[failure.status] = (summary.failureHttpStatusCounts[failure.status] ?? 0) + 1;
+      await onProgress({ brandId: brand.id, brand: brand.name, status: "failed", reasonCode: failure.reasonCode, httpStatus: failure.status, ...counters });
       continue;
     }
     items.push(...retained);
