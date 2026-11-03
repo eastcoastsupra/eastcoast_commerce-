@@ -1,0 +1,10 @@
+{
+  "verified": false,
+  "reason": "Both stores currently use weight-based shipping. Supplier weight units and site weight units must be verified before new products are published.",
+  "sourceWeightUnit": null,
+  "siteWeightUnits": {
+    "eastcoastsupra": null,
+    "ecbmw": null
+  },
+  "evidenceUrls": []
+}

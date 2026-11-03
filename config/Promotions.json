@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "currency": "USD",
+  "existingRegularPriceMode": "raise-only",
+  "manufacturerPromotionChecks": true,
+  "requireExactItemEligibility": true,
+  "requireConsumerOfferTerms": true,
+  "requireStartAndEndWithTimezone": true,
+  "requireDocumentedMapExceptionForBelowMap": true,
+  "dealerCostDiscountIsConsumerPromotion": false,
+  "offers": []
+}
