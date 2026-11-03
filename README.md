@@ -15,6 +15,7 @@ Read [OPERATIONS.md](OPERATIONS.md) for commands, caps, report interpretation, a
 - **SEO:** `.github/workflows/CommerceSeo.yml` fills missing product titles and meta descriptions and corrects copied store identity. Existing custom metadata and structured data are preserved.
 - **Promotions:** `config/Promotions.json` and `src/sync/promotionCheck.js` validate documented customer offers in review-only mode. Dealer-cost changes do not activate retail sales. Verified eligible items, dates, terms, and a reliable sale-expiry mechanism are required before activation.
 - **Legacy Chemical Guys workflow:** superseded by the broader catalog job. Its old schedule and write operation are disabled.
+- **Manual preview:** the former MAP dry-run workflow now runs the new catalog preview for both stores and exports only aggregate counts.
 
 ## Matching and pricing
 

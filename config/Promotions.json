@@ -1,5 +1,6 @@
 {
   "version": 1,
+  "executionMode": "review-only",
   "currency": "USD",
   "existingRegularPriceMode": "raise-only",
   "manufacturerPromotionChecks": true,
