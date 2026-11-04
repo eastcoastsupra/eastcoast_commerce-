@@ -1,10 +1,17 @@
 {
-  "verified": false,
-  "reason": "Both stores currently use weight-based shipping. Supplier weight units and site weight units must be verified before new products are published.",
-  "sourceWeightUnit": null,
+  "verified": true,
+  "reason": "Merchant confirmed that Turn 14 box weights and both Wix store weight settings are pounds. The displayed supplier box sequence is length, width, height, then actual box weight.",
+  "sourceWeightUnit": "LB",
   "siteWeightUnits": {
-    "eastcoastsupra": null,
-    "ecbmw": null
+    "eastcoastsupra": "LB",
+    "ecbmw": "LB"
+  },
+  "sourceWeightBasis": "PER_BOX",
+  "sourceWeightField": "attributes.dimensions[].weight",
+  "sourceDisplayOrder": ["length", "width", "height", "weight"],
+  "verification": {
+    "method": "merchant-confirmation",
+    "date": "2026-11-03"
   },
   "evidenceUrls": []
 }

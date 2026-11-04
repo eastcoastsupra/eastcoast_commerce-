@@ -1,0 +1,51 @@
+name: Turn 14 Pounds Import Canary
+
+on:
+  push:
+    branches:
+      - shipping-pounds-20261103
+    paths:
+      - .github/workflows/ImportCanary.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eastcoast-commerce-writes
+  cancel-in-progress: false
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Check out unchanged baseline
+        uses: actions/checkout@v4
+        with:
+          ref: ff5a1451a19eb245d0e713d746bc58b8cf09e109
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Validate unchanged baseline
+        run: npm run validate
+      - name: Check out pounds configuration
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate pounds configuration and all regression tests
+        run: npm run validate
+      - name: Import at most two verified products per store without repricing existing products
+        env:
+          TURN14_CLIENT_ID: ${{ secrets.TURN14_CLIENT_ID }}
+          TURN14_CLIENT_SECRET: ${{ secrets.TURN14_CLIENT_SECRET }}
+          WIX_API_KEY: ${{ secrets.WIX_API_KEY }}
+        run: node scripts/SyncCommerce.mjs --brands "CSF,Mishimoto,H&R" --apply --max-updates 0 --max-creates 2
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pounds-import-summary-${{ github.run_id }}
+          path: reports/commerce/Summary.json
+          retention-days: 30
+          if-no-files-found: warn
