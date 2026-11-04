@@ -39,8 +39,13 @@ function imagesFrom(files) {
       if (!object(link) || !explicitHttpsUrl(link.url)) continue;
       const width = dimension(link.width);
       const height = dimension(link.height);
-      const area = width !== null && height !== null ? width * height : null;
-      if (!Number.isSafeInteger(area) || area <= 0) continue;
+      const measuredArea = width !== null && height !== null ? width * height : null;
+      // Live supplier images can have unusable optional pixel metadata. The
+      // exact HTTPS image URL, image type and extension remain mandatory.
+      // Prefer a known resolution, otherwise retain the first supplied URL.
+      // Unknown dimensions remain null; they never become invented pixels.
+      // Publication still requires Wix to attach and return actual media.
+      const area = Number.isSafeInteger(measuredArea) && measuredArea > 0 ? measuredArea : 0;
       if (!largest || area > largest.area) largest = { url: link.url, width, height, area };
     }
     if (!largest || seenUrls.has(largest.url)) continue;
@@ -71,7 +76,6 @@ export function normalizeItemContent(response, item) {
   const descriptions = (record.descriptions ?? [])
     .filter((entry) => object(entry) && typeof entry.type === "string" && typeof entry.description === "string")
     .map((entry) => ({ type: entry.type, description: entry.description }));
-  // Rank by meaningful text length only, never by an undocumented type value.
   let description = "";
   let longest = 0;
   for (const entry of descriptions) {
@@ -107,7 +111,6 @@ export function normalizeItemFitment(response, item) {
   if (!object(attributes) || !Array.isArray(attributes.vehicle_ids) || attributes.vehicle_ids.some((id) => !identifier(id)) || typeof attributes.late_models_only !== "boolean") {
     return unknownFitment("fitment-fields-invalid");
   }
-  // These are supplier vehicle IDs. No make/model/year inference is made.
   return { known: true, itemId: item.itemId, vehicleIds: [...new Set(attributes.vehicle_ids)], lateModelsOnly: attributes.late_models_only, reason: "supplier-vehicle-ids" };
 }
 

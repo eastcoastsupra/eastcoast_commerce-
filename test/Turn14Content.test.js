@@ -16,7 +16,7 @@ const content = (extra = {}) => ({ data: [{
 }] });
 const fitment = () => ({ data: { id: "21466", attributes: { vehicle_ids: ["100", "101"], late_models_only: false } } });
 
-test("content selects the largest explicit HTTPS image per file, parses string dimensions, and preserves metadata", () => {
+test("content prefers known resolution but accepts explicit HTTPS image URLs with unknown optional pixel metadata", () => {
   const result = normalizeItemContent(content({ files: [
     file("one", { type: "iMaGe", file_extension: ".jPg" }),
     file("video", { type: "Video", file_extension: "MP4" }),
@@ -25,11 +25,34 @@ test("content selects the largest explicit HTTPS image per file, parses string d
     file("invalid-size", { links: [{ url: "https://cdn.example.com/image.jpg", width: "unknown", height: "4000" }] })
   ] }), item);
   assert.equal(result.known, true);
-  assert.equal(result.images.length, 1);
+  assert.equal(result.images.length, 2);
   assert.equal(result.images[0].url, "https://cdn.example.com/one-large.jpg");
   assert.equal(result.images[0].width, 1200);
   assert.equal(result.images[0].mediaContent, "supplier-value");
+  assert.equal(result.images[1].url, "https://cdn.example.com/image.jpg");
+  assert.equal(result.images[1].width, null);
   assert.equal(result.fitmentPath, "/v1/items/fitment/21466");
+});
+
+test("unknown image dimensions never invent pixels or relax URL and file-type checks", () => {
+  const result = normalizeItemContent(content({ files: [
+    file("unknown", { links: [{ url: "https://cdn.example.com/unknown.jpg" }] }),
+    file("zero", { links: [{ url: "https://cdn.example.com/zero.jpg", width: "0", height: "0" }] }),
+    file("unsafe", { links: [{ url: "javascript:alert(1)" }, { url: "file:///private" }, { url: "https://user:pass@cdn.example.com/x.jpg" }] }),
+    file("pdf", { type: "Document", file_extension: "pdf", links: [{ url: "https://cdn.example.com/x.pdf" }] })
+  ] }), item);
+  assert.equal(result.images.length, 2);
+  assert.ok(result.images.every(image => image.width === null && image.height === null));
+});
+
+test("known resolution wins over unknown metadata without generating or rewriting URLs", () => {
+  const result = normalizeItemContent(content({ files: [file("one", { links: [
+    { url: "https://cdn.example.com/unknown.jpg", width: "unknown", height: "unknown" },
+    { url: "https://cdn.example.com/known.jpg", width: "800", height: "600" },
+    { url: "https://cdn.example.com/other.jpg", width: "0", height: "0" }
+  ] })] }), item);
+  assert.equal(result.images[0].url, "https://cdn.example.com/known.jpg");
+  assert.equal(result.images[0].width, 800);
 });
 
 test("content caps image files at eight and does not substitute generated URLs", () => {
