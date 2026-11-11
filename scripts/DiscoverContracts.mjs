@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { Turn14Client } from "../src/turn14/client.js";
+import { supplierRequestLane } from "../src/turn14/request-lane.js";
 import { requiredEnv } from "../src/lib/env.js";
 
 // Bounded, read-only schema probes on the supplier host. No order, quote,
@@ -85,6 +86,7 @@ async function probePublicDocumentation(url) {
   // These are exactly two unauthenticated public GETs, never portal-session
   // reads. Do not add credentials, cookies, redirects, retries, or form values.
   try {
+    do { await supplierRequestLane.wait(); } while (!supplierRequestLane.tryStart());
     const response = await fetch(url, {
       method: "GET", redirect: "manual", credentials: "omit",
       headers: { accept: "text/html, application/json" },

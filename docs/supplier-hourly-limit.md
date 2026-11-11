@@ -1,0 +1,12 @@
+# Managed Turn 14 hourly ceiling
+
+The owner-configured ceiling is **4,999 attempted requests per hour** across the two managed repositories. The code uses a conservative allocation: one supplier lane in East Coast Offroad and one in the legacy Supra/BMW integration, each with at least **1,500 milliseconds between physical network starts**. Each lane waits before its first request too.
+
+For an inclusive rolling hour, one lane can start at most floor(3,600,000 / 1,500) + 1 = **2,401** requests; both lanes together can start at most **4,802**, leaving 197 below the ceiling. Actual throughput is lower when requests, supplier cooldowns, or processing take time. OAuth requests and all retry attempts consume the same lane spacing. Existing smaller per-run request allowances still apply.
+
+This is not a distributed shared counter and does not identify the supplier's quota or reset window. It governs these two updated integrations only. Other apps, old deployed code, manually started parallel processes on other machines, and historical workflow revisions are outside the bound. Keep those supplier readers stopped or allocate their traffic before asserting an account-wide guarantee.
+
+All supplier workflows within each repository use one fixed concurrency group with cancel-in-progress false. Offroad uses eastcoastoffroad-catalog; legacy Supra/BMW uses eastcoast-commerce-writes. Credentials remain confined to their existing steps. Presence-only doctor checks make no supplier requests. Any new supplier workflow, including the selected inventory mode, must join its repository group. Jobs use sequential supplier processes; do not launch independent supplier processes concurrently. A process-wide monotonic-clock lane covers all production client instances, and the first-fetch delay prevents sequential process or job restarts from resetting request spacing.
+
+Deploy both reviewed patches and allow previous jobs to finish. The first fully bounded rolling hour begins only after 60 minutes have passed since the last unpaced request; unknown earlier usage cannot be reset by deploying code. Use only updated workflow revisions; do not manually dispatch a pre-limit revision. No scan, schedule, catalog apply, price change, order, or fulfillment operation is enabled by this pacing change. Supplier 429 responses continue to require their own cooldown handling; remaining under the owner's ceiling is not a promise that the supplier will accept every request.
+

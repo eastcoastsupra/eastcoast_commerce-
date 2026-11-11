@@ -31,14 +31,16 @@ export async function requestJson(url, options = {}, runtime = {}) {
   const retryBaseMs = runtime.retryBaseMs ?? 750;
 
   for (let attempt = 0; attempt <= retries; attempt += 1) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    let controller, timeout;
 
     try {
-      const response = await fetch(url, {
-        ...options,
-        signal: controller.signal
-      });
+      const start = () => {
+        controller = new AbortController();
+        timeout = setTimeout(() => controller.abort(), timeoutMs);
+        return (runtime.fetcher ?? globalThis.fetch)(url, { ...options, signal: controller.signal });
+      };
+      // A supplier lane can delay admission without consuming the request timeout.
+      const response = await (runtime.startAttempt ? runtime.startAttempt(start) : start());
       const body = await readResponseBody(response);
 
       if (response.ok) {

@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { Turn14Client } from "../src/turn14/client.js";
+import { supplierRequestLane } from "../src/turn14/request-lane.js";
 import { optionalEnv, requiredEnv } from "../src/lib/env.js";
 
 // This job only reads the routes already exercised by the production sync.
@@ -186,6 +187,7 @@ async function publicDocumentationProbe() {
   // No Authorization header, cookies, or client credentials are sent here.
   const url = `${BASE_URL}/`;
   try {
+    do { await supplierRequestLane.wait(); } while (!supplierRequestLane.tryStart());
     const response = await fetch(url, {
       method: "GET", redirect: "manual", headers: { accept: "application/json, text/html" },
       signal: AbortSignal.timeout(15000)

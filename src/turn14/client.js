@@ -1,11 +1,22 @@
 import { requestJson } from "../lib/http.js";
+import { supplierRequestLane } from "./request-lane.js";
 
 export class Turn14Client {
   constructor({ clientId, clientSecret, baseUrl, httpRuntime }) {
     this.clientId = clientId;
     this.clientSecret = clientSecret;
     this.baseUrl = baseUrl.replace(/\/$/u, "");
-    this.httpRuntime = httpRuntime;
+    const fetcher = httpRuntime?.fetcher ?? globalThis.fetch;
+    const lane = fetcher === globalThis.fetch ? supplierRequestLane : httpRuntime?.requestLane ?? supplierRequestLane;
+    this.httpRuntime = { ...httpRuntime,
+      startAttempt: async start => {
+        do { await lane.wait(); } while (!lane.tryStart());
+        // Start the timeout and actual token/GET/retry fetch without another await.
+        return start();
+      },
+      // Automatic redirects would issue unpaced hidden HTTP requests.
+      fetcher: (url, options) => fetcher(url, { ...options, redirect: "error" })
+    };
     this.accessToken = null;
     this.tokenExpiresAt = 0;
   }

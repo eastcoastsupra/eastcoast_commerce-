@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: eastcoast-commerce-writes
+  cancel-in-progress: false
+
 jobs:
   preview:
     runs-on: ubuntu-latest
